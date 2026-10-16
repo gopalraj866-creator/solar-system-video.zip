@@ -1,0 +1,172 @@
+name: Render Solar System video
+
+# Run it from the "Actions" tab → "Render Solar System video" → "Run workflow".
+# The 8:00 timeline is split into N chunks that render in parallel (each chunk = independent frames),
+# then an assemble job joins them, adds the ambient soundtrack and publishes the final MP4.
+
+on:
+  workflow_dispatch:
+    inputs:
+      resolution:
+        description: "Output resolution"
+        type: choice
+        options: ["1080p", "4k"]
+        default: "1080p"
+      fps:
+        description: "Frames per second"
+        type: choice
+        options: ["30", "24"]
+        default: "30"
+      chunks:
+        description: "Parallel render jobs (0 = auto: 20 for 1080p, 48 for 4K)"
+        type: string
+        default: "0"
+      badge_text:
+        description: "Badge text top-left (e.g. 'LIVE • SOLAR SYSTEM EXPLORER')"
+        type: string
+        default: "SOLAR SYSTEM EXPLORER"
+      textures:
+        description: "Download real planet textures (falls back to procedural if unavailable)"
+        type: boolean
+        default: true
+      quick_test:
+        description: "Quick test: render only a 15-second sample with one job"
+        type: boolean
+        default: false
+      publish_release:
+        description: "Also attach the final MP4 to a GitHub Release (easier large download)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.p.outputs.matrix }}
+      chunks: ${{ steps.p.outputs.chunks }}
+      res: ${{ steps.p.outputs.res }}
+      extra: ${{ steps.p.outputs.extra }}
+      duration: ${{ steps.p.outputs.duration }}
+      texw: ${{ steps.p.outputs.texw }}
+    steps:
+      - id: p
+        env:
+          RESOLUTION: ${{ inputs.resolution }}
+          CHUNKS_IN: ${{ inputs.chunks }}
+          QUICK: ${{ inputs.quick_test }}
+        run: |
+          if [ "$RESOLUTION" = "4k" ]; then RES=4k; DEF=48; TEXW=4096; else RES=1080; DEF=20; TEXW=2048; fi
+          N="$CHUNKS_IN"; if ! [[ "$N" =~ ^[0-9]+$ ]] || [ "$N" -lt 1 ]; then N=$DEF; fi
+          EXTRA=""; DUR=480
+          if [ "$QUICK" = "true" ]; then N=1; EXTRA="--start 85 --end 100"; DUR=15; fi
+          echo "res=$RES"        >> "$GITHUB_OUTPUT"
+          echo "chunks=$N"       >> "$GITHUB_OUTPUT"
+          echo "extra=$EXTRA"    >> "$GITHUB_OUTPUT"
+          echo "duration=$DUR"   >> "$GITHUB_OUTPUT"
+          echo "texw=$TEXW"      >> "$GITHUB_OUTPUT"
+          echo "matrix=$(python3 -c "import json;print(json.dumps(list(range($N))))")" >> "$GITHUB_OUTPUT"
+          echo "Plan: $RES, $N chunk(s), extra='$EXTRA'"
+
+  render:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        chunk: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium and ffmpeg
+        run: |
+          npx playwright install --with-deps chromium
+          sudo apt-get update -y && sudo apt-get install -y ffmpeg
+
+      - name: Restore texture cache
+        if: ${{ inputs.textures }}
+        uses: actions/cache@v4
+        with:
+          path: textures
+          key: textures-v1-${{ needs.plan.outputs.texw }}-${{ hashFiles('scripts/download_textures.sh') }}
+
+      - name: Download textures
+        if: ${{ inputs.textures }}
+        run: bash scripts/download_textures.sh ${{ needs.plan.outputs.texw }}
+
+      - name: Render chunk ${{ matrix.chunk }} of ${{ needs.plan.outputs.chunks }}
+        env:
+          BADGE: ${{ inputs.badge_text }}
+          RES: ${{ needs.plan.outputs.res }}
+          FPS: ${{ inputs.fps }}
+          N: ${{ needs.plan.outputs.chunks }}
+          EXTRA: ${{ needs.plan.outputs.extra }}
+          CHUNK: ${{ matrix.chunk }}
+        run: |
+          OUT="out/chunk_$(printf '%03d' "$CHUNK").mp4"
+          node render.mjs --res "$RES" --fps "$FPS" --chunk "$CHUNK" --chunks "$N" --badge "$BADGE" --out "$OUT" $EXTRA
+
+      - name: Save a preview frame
+        if: ${{ always() && matrix.chunk == 0 }}
+        run: ls -la out || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chunk-${{ matrix.chunk }}
+          path: out/chunk_*.mp4
+          retention-days: 2
+          compression-level: 0
+          if-no-files-found: error
+
+  assemble:
+    needs: [plan, render]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: sudo apt-get update -y && sudo apt-get install -y ffmpeg
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: chunk-*
+          merge-multiple: true
+          path: chunks
+
+      - name: Join chunks + add soundtrack
+        env:
+          RES: ${{ needs.plan.outputs.res }}
+          DUR: ${{ needs.plan.outputs.duration }}
+        run: |
+          ls -la chunks
+          bash scripts/assemble.sh chunks "out/solar-system-${RES}.mp4" "$DUR"
+
+      - name: Upload final video
+        uses: actions/upload-artifact@v4
+        with:
+          name: solar-system-${{ needs.plan.outputs.res }}
+          path: out/solar-system-*.mp4
+          retention-days: 14
+          compression-level: 0
+
+      - name: Attach to GitHub Release
+        if: ${{ inputs.publish_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: solar-system-${{ needs.plan.outputs.res }}-${{ github.run_number }}
+          name: Solar System ${{ needs.plan.outputs.res }} (run ${{ github.run_number }})
+          files: out/solar-system-*.mp4
