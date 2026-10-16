@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Solar System Explorer — Technical Talk India</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script type="importmap">
+{ "imports": {
+  "three": "/node_modules/three/build/three.module.js",
+  "three/addons/": "/node_modules/three/examples/jsm/"
+} }
+</script>
+<style>
+  :root { --accent: #ffb454; --ink: #f4f7ff; --dim: rgba(220,230,255,.62); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+  body { font-family: "Helvetica Neue", "Segoe UI", Roboto, "Liberation Sans", Arial, sans-serif; color: var(--ink); }
+  #stage, #stage canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; display: block; }
+  .layer { position: absolute; inset: 0; pointer-events: none; }
+  /* NOTE: nothing here uses CSS transitions/animations — every value is set per frame from the timeline,
+     so frames render identically no matter how fast or slow the machine is. */
+
+  #badge { position: absolute; left: 44px; top: 36px; display: flex; align-items: center; gap: 14px;
+    padding: 10px 20px 10px 16px; background: rgba(6,10,24,.55); border: 1px solid rgba(255,255,255,.14); border-radius: 999px; backdrop-filter: blur(4px); }
+  #dot { width: 12px; height: 12px; border-radius: 50%; background: #ff3b3b; box-shadow: 0 0 12px #ff3b3b; }
+  #badge-text { font-weight: 700; letter-spacing: .22em; font-size: 17px; }
+  #brand { font-size: 12px; letter-spacing: .3em; color: var(--dim); padding-left: 14px; border-left: 1px solid rgba(255,255,255,.22); }
+
+  #lower { position: absolute; left: 44px; bottom: 48px; min-width: 520px; padding: 20px 28px 22px 26px;
+    border-left: 3px solid var(--accent); background: linear-gradient(90deg, rgba(5,9,22,.72), rgba(5,9,22,0)); }
+  #l-name { font-size: 58px; font-weight: 800; letter-spacing: .02em; line-height: 1; text-shadow: 0 2px 18px rgba(0,0,0,.6); }
+  #l-type { margin-top: 8px; font-size: 16px; letter-spacing: .26em; text-transform: uppercase; color: var(--accent); }
+  #l-stats { display: flex; gap: 34px; margin-top: 18px; }
+  #l-stats span { display: block; font-size: 12px; letter-spacing: .2em; color: var(--dim); }
+  #l-stats b { display: block; margin-top: 5px; font-size: 21px; font-weight: 600; }
+
+  #facts { position: absolute; right: 44px; top: 36px; width: 380px; padding: 16px 20px 18px; background: rgba(6,10,24,.55);
+    border: 1px solid rgba(255,255,255,.14); border-radius: 10px; backdrop-filter: blur(4px); }
+  #facts h4 { font-size: 12px; letter-spacing: .28em; color: var(--accent); margin-bottom: 9px; }
+  #f-text { font-size: 19px; line-height: 1.38; }
+
+  #scale { position: absolute; right: 44px; bottom: 48px; text-align: right; font-size: 13px; letter-spacing: .12em; color: var(--dim); line-height: 1.7; }
+  #scale b { color: #ffd9a0; letter-spacing: .24em; }
+  #credits { display: none; margin-top: 4px; font-size: 11px; letter-spacing: .06em; opacity: .75; }
+
+  #labels { position: absolute; inset: 0; overflow: hidden; }
+  .label { position: absolute; left: 0; top: 0; opacity: 0; white-space: nowrap; will-change: transform; }
+  .label i { position: absolute; left: -4px; top: -4px; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid #fff; }
+  .label b { position: absolute; left: 14px; top: -22px; font-size: 17px; font-weight: 700; letter-spacing: .08em; text-shadow: 0 1px 8px #000; }
+  .label em { position: absolute; left: 14px; top: -3px; font-style: normal; font-size: 13px; letter-spacing: .1em; color: #9fc4ff; text-shadow: 0 1px 6px #000; }
+
+  #title { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0; text-align: center; }
+  #title h1 { font-size: 118px; font-weight: 800; letter-spacing: .34em; padding-left: .34em; text-shadow: 0 4px 40px rgba(0,0,0,.8); }
+  #title p { margin-top: 18px; font-size: 24px; letter-spacing: .42em; color: #ffd9a0; text-shadow: 0 2px 16px #000; }
+  #outro { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0; text-align: center; background: radial-gradient(ellipse at center, rgba(0,0,0,.45), rgba(0,0,0,0) 70%); }
+  #outro h2 { font-size: 64px; font-weight: 800; letter-spacing: .22em; padding-left: .22em; text-shadow: 0 4px 30px #000; }
+  #outro p { margin-top: 16px; font-size: 24px; letter-spacing: .2em; color: #ffd9a0; text-shadow: 0 2px 14px #000; }
+  #fade { position: absolute; inset: 0; background: #000; opacity: 1; }
+  #sim { position: absolute; left: 44px; top: 92px; font-size: 12px; letter-spacing: .24em; color: var(--dim); }
+</style>
+</head>
+<body>
+  <div id="stage"></div>
+  <div class="layer">
+    <div id="labels"></div>
+    <div id="badge"><span id="dot"></span><span id="badge-text">SOLAR SYSTEM EXPLORER</span><span id="brand">TECHNICAL TALK INDIA</span></div>
+    <div id="sim"></div>
+    <div id="facts"><h4>DID YOU KNOW?</h4><div id="f-text"></div></div>
+    <div id="lower"><div id="l-name"></div><div id="l-type"></div><div id="l-stats"></div></div>
+    <div id="scale"><b>NOT TO SCALE</b><br>Sizes &amp; distances compressed for visibility<br>1 second ≈ 6 days · rotation sped up
+      <div id="credits">Textures: Solar System Scope · CC BY 4.0</div></div>
+    <div id="title"><h1>THE SOLAR SYSTEM</h1><p>A JOURNEY FROM THE SUN TO NEPTUNE</p></div>
+    <div id="outro"><h2>THANKS FOR WATCHING</h2><p>LIKE · SHARE · SUBSCRIBE TO TECHNICAL TALK INDIA</p></div>
+    <div id="fade"></div>
+  </div>
+  <script type="module" src="/public/js/scene.js"></script>
+</body>
+</html>

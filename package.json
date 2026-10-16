@@ -1,0 +1,22 @@
+{
+  "name": "solar-system-video",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cinematic 3D Solar System video (Three.js + headless Chromium + ffmpeg) for Technical Talk India",
+  "scripts": {
+    "live": "node scripts/serve.mjs",
+    "textures": "bash scripts/download_textures.sh 2048",
+    "textures:4k": "bash scripts/download_textures.sh 4096",
+    "preview": "node render.mjs --res 720 --png 12,40,100,118,255,282,328,372",
+    "render:1080": "node render.mjs --res 1080 --out out/solar-system-silent-1080p.mp4 --chunks 1",
+    "render:4k": "node render.mjs --res 4k --out out/solar-system-silent-4k.mp4 --chunks 1"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0",
+    "three": "^0.170.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
